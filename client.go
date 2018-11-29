@@ -355,6 +355,20 @@ func (c *Client) Connect(server, origin string) error {
 	return nil
 }
 
+// Ping is a simple Write to the websocket connection to test if the connection is alive
+func (c *Client) Ping(topicURI string) error {
+
+	var err error
+	var msg []byte //empty message
+
+	c.ws.PayloadType = 9 //Set payload type to PingFrame (since we're pinging the server)
+	if _, err = c.ws.Write(msg); err != nil {
+		return fmt.Errorf("Error writing Ping to websocket: %s", err)
+	}
+	c.ws.PayloadType = 1 //Set the PayloadType back to TextFrame to resume normal use
+	return nil
+}
+
 // SetSessionOpenCallback adds a callback function that is run when a new session begins.
 // The callback function must accept a string argument that is the session ID.
 func (c *Client) SetSessionOpenCallback(f func(string)) {
