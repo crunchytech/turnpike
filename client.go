@@ -30,6 +30,8 @@ type Client struct {
 	ServerIdent         string
 	ws                  *websocket.Conn
 	messages            chan string
+	killSend            bool
+	killReceive         bool
 	prefixes            prefixMap
 	eventHandlers       map[string]EventHandler
 	calls               map[string]chan CallResult
@@ -262,6 +264,7 @@ func (c *Client) receive() {
 					log.Printf("turnpike: error receiving message, aborting connection: %s", err)
 				}
 			}
+			log.Printf("breaking out of receive routine. Error: %s", err)
 			break
 		}
 		if debug {
@@ -319,6 +322,10 @@ func (c *Client) receive() {
 
 func (c *Client) send() {
 	for msg := range c.messages {
+		if c.killSend {
+			break
+		}
+
 		if debug {
 			log.Printf("turnpike: sending message: %s", msg)
 		}
@@ -349,8 +356,18 @@ func (c *Client) Connect(server, origin string) error {
 		log.Printf("turnpike: connected to server: %s", server)
 	}
 
+	c.killSend = false
+	c.killReceive = false
+
 	go c.receive()
 	go c.send()
+
+	return nil
+}
+
+// Disconnect disconnects the client and cleans up the never ending go routine for turnpike's send() function
+func (c *Client) Disconnect() error {
+	c.killSend = true
 
 	return nil
 }
@@ -361,9 +378,17 @@ func (c *Client) Ping(topicURI string) error {
 	var err error
 	var msg []byte //empty message
 
+	if c.ws == nil {
+		return fmt.Errorf("Error: websocket connection is nil")
+	}
 	c.ws.PayloadType = 9 //Set payload type to PingFrame (since we're pinging the server)
+
 	if _, err = c.ws.Write(msg); err != nil {
 		return fmt.Errorf("Error writing Ping to websocket: %s", err)
+	}
+
+	if c.ws == nil {
+		return fmt.Errorf("Error: websocket connection is nil")
 	}
 	c.ws.PayloadType = 1 //Set the PayloadType back to TextFrame to resume normal use
 	return nil
