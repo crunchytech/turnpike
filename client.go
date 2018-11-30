@@ -30,10 +30,9 @@ type Client struct {
 	ServerIdent         string
 	ws                  *websocket.Conn
 	messages            chan string
-	killSend            bool
-	killReceive         bool
 	prefixes            prefixMap
 	eventHandlers       map[string]EventHandler
+	errorHandler        ErrorHandler
 	calls               map[string]chan CallResult
 	sessionOpenCallback func(string)
 }
@@ -49,6 +48,10 @@ type CallResult struct {
 // EventHandler is an interface for handlers to published events. The topicURI
 // is the URI of the event and event is the event centents.
 type EventHandler func(topicURI string, event interface{})
+
+// ErrorHandler is an interface for handlers to pipe errors and disconnect
+//	occurances to the application using Wamp
+type ErrorHandler func(err error, disconnect bool)
 
 // NewClient creates a new WAMP client.
 func NewClient() *Client {
@@ -218,7 +221,16 @@ func (c *Client) handleEvent(msg eventMsg) {
 		if debug {
 			log.Printf("turnpike: missing event handler for URI: %s", msg.TopicURI)
 		}
+		err := fmt.Errorf("turnpike: missing event handler for URI: %s", msg.TopicURI)
+		c.handleError(err, false)
 	}
+}
+
+//Simple handler to forward to package user, notifiying of disconnects as well
+func (c *Client) handleError(err error, disconnect bool) {
+	handler := c.errorHandler
+	log.Println("About to call error handler...")
+	handler(err, disconnect)
 }
 
 func (c *Client) receiveWelcome() error {
@@ -264,7 +276,11 @@ func (c *Client) receive() {
 					log.Printf("turnpike: error receiving message, aborting connection: %s", err)
 				}
 			}
-			log.Printf("breaking out of receive routine. Error: %s", err)
+			if debug {
+				log.Printf("turnpike: breaking out of receive routine. Error: %s", err)
+			}
+			c.messages <- "KILLSENDROUTINE"
+			c.handleError(err, true) //Pipe the error up to the calling application and indicate the disconnect
 			break
 		}
 		if debug {
@@ -322,7 +338,8 @@ func (c *Client) receive() {
 
 func (c *Client) send() {
 	for msg := range c.messages {
-		if c.killSend {
+		if msg == "KILLSENDROUTINE" {
+			log.Printf("turnpike: send routine abort message recieved...breaking...")
 			break
 		}
 
@@ -333,19 +350,24 @@ func (c *Client) send() {
 			if debug {
 				log.Printf("turnpike: error sending message: %s", err)
 			}
+			c.handleError(err, false)
 		}
 	}
 }
 
 // Connect will connect to server with an optional origin.
 // More details here: http://godoc.org/code.google.com/p/go.net/websocket#Dial
-func (c *Client) Connect(server, origin string) error {
+func (c *Client) Connect(server, origin string, f ErrorHandler) error {
 	if debug {
 		log.Print("turnpike: connect")
 	}
 	var err error
 	if c.ws, err = websocket.Dial(server, wampProtocolId, origin); err != nil {
 		return fmt.Errorf("Error connecting to websocket server: %s", err)
+	}
+
+	if f != nil {
+		c.errorHandler = f
 	}
 
 	// Receive welcome message
@@ -356,18 +378,8 @@ func (c *Client) Connect(server, origin string) error {
 		log.Printf("turnpike: connected to server: %s", server)
 	}
 
-	c.killSend = false
-	c.killReceive = false
-
 	go c.receive()
 	go c.send()
-
-	return nil
-}
-
-// Disconnect disconnects the client and cleans up the never ending go routine for turnpike's send() function
-func (c *Client) Disconnect() error {
-	c.killSend = true
 
 	return nil
 }
