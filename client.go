@@ -229,7 +229,6 @@ func (c *Client) handleEvent(msg eventMsg) {
 //Simple handler to forward to package user, notifiying of disconnects as well
 func (c *Client) handleError(err error, disconnect bool) {
 	handler := c.errorHandler
-	log.Println("About to call error handler...")
 	handler(err, disconnect)
 }
 
@@ -339,7 +338,6 @@ func (c *Client) receive() {
 func (c *Client) send() {
 	for msg := range c.messages {
 		if msg == "KILLSENDROUTINE" {
-			log.Printf("turnpike: send routine abort message recieved...breaking...")
 			break
 		}
 
